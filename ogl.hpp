@@ -9,7 +9,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#define OGLPP_GLM_UNIFORM_METHODS \
+#define OGL_GLM_UNIFORM_METHODS \
 void setUniform(const char* name, const glm::vec2& v) { glUniform2fv(glGetUniformLocation(handle, name), 2, glm::value_ptr(v)); } \
 void setUniform(const char* name, const glm::vec3& v) { glUniform3fv(glGetUniformLocation(handle, name), 3, glm::value_ptr(v)); } \
 void setUniform(const char* name, const glm::vec4& v) { glUniform4fv(glGetUniformLocation(handle, name), 4, glm::value_ptr(v)); } \
@@ -17,7 +17,7 @@ void setUniform(const char* name, const glm::mat4& m) { glUniformMatrix4fv(glGet
 
 #endif
 
-#ifndef OGLPP_GLM_UNIFORM_METHODS
+#ifndef OGL_GLM_UNIFORM_METHODS
 #define OGLPP_GLM_UNIFORM_METHODS 
 #endif
 
@@ -37,8 +37,40 @@ void operator=(Name&& other) noexcept MOVER
 NOT_COPYABLE(Name) \
 MOVEABLE(Name, MOVER)
 
+#ifdef WIN32
+void _debugbreak();
+#define OGL_ASSERT(expr) if (!(expr)) __debugbreak();
+#endif
+
+#ifdef _DEBUG || defined(OGL_ASSERT_ON_ERROR)
+#define OGL_ERROR_CHECK() OGL_ASSERT(!gl::getError())
+#else
+#define OGL_ERROR_CHECK() void
+#endif
+
 namespace gl
 {
+	// returns the last error string
+	// or nullptr if no error
+	static const char* getError()
+	{
+#define GL_ERROR_CASE(glenum) case glenum: return #glenum;
+		switch (glGetError())
+		{
+		default:
+		case GL_NO_ERROR: break;
+		GL_ERROR_CASE(GL_INVALID_ENUM);
+		GL_ERROR_CASE(GL_INVALID_VALUE);
+		GL_ERROR_CASE(GL_INVALID_OPERATION);
+		GL_ERROR_CASE(GL_INVALID_FRAMEBUFFER_OPERATION);
+		GL_ERROR_CASE(GL_OUT_OF_MEMORY);
+		GL_ERROR_CASE(GL_STACK_UNDERFLOW);
+		GL_ERROR_CASE(GL_STACK_OVERFLOW);
+		}
+
+		return nullptr;
+	}
+
 	struct Object
 	{
 	protected:
@@ -49,7 +81,7 @@ namespace gl
 		virtual void destroy() = 0;
 		virtual void bind() = 0;
 		virtual void release() = 0;
-		GLuint getHandleID() const { return handle; }
+		GLuint getID() const { return handle; }
 		virtual bool isValid() const { return handle != 0; }
 	};
 
@@ -81,6 +113,7 @@ namespace gl
 		{
 			glGenVertexArrays(1, &handle);
 			bind();
+			OGL_ERROR_CHECK();
 		}
 
 		template<typename VertexT>
@@ -88,6 +121,7 @@ namespace gl
 			VertexArray()
 		{
 			setVertexData(verts, numVerts, std::move(layout));
+			OGL_ERROR_CHECK();
 		}
 
 		template<typename VertexT>
@@ -96,6 +130,7 @@ namespace gl
 		{
 			setVertexData(verts, numVerts, std::move(layout));
 			setElementData(indices, numIndices);
+			OGL_ERROR_CHECK();
 		}
 
 		~VertexArray()
@@ -106,31 +141,41 @@ namespace gl
 		template<typename VertexT>
 		void setVertexData(const VertexT* verts, int numVerts, std::initializer_list<Layout> layout)
 		{
+			bind();
+
 			if (!vbo.handle)
 				glGenBuffers(1, &vbo.handle);
+			OGL_ERROR_CHECK();
 
-			glBindBuffer(GL_VERTEX_ARRAY, vbo.handle);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo.handle);
+			OGL_ERROR_CHECK();
 
 			vbo.numVerts = numVerts;
-			glBufferData(GL_VERTEX_ARRAY, numVerts * sizeof(VertexT), verts, GL_STATIC_DRAW);
+			glBufferData(GL_ARRAY_BUFFER, numVerts * sizeof(VertexT), verts, GL_STATIC_DRAW);
+			OGL_ERROR_CHECK();
 
 			for (auto elem : layout)
 			{
 				glEnableVertexAttribArray(elem.index);
 				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(Vertex), (void*)elem.offset);
-				glDisableVertexAttribArray(elem.index);
+				OGL_ERROR_CHECK();
 			}
 		}
 
 		void setElementData(const uint32_t* indices, int numIndices)
 		{
+			bind();
+
 			if (!ebo.handle)
 				glGenBuffers(1, &ebo.handle);
+			OGL_ERROR_CHECK();
 
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo.handle);
+			OGL_ERROR_CHECK();
 
 			ebo.numElems = numIndices;
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(uint32_t), indices, GL_STATIC_DRAW);
+			OGL_ERROR_CHECK();
 		}
 
 		NOT_COPYABLE_BUT_MOVEABLE(VertexArray, 
@@ -149,6 +194,7 @@ namespace gl
 		void bind() override 
 		{
 			glBindVertexArray(handle);
+			OGL_ERROR_CHECK();
 		}
 
 		void release() override 
@@ -166,10 +212,17 @@ namespace gl
 			{
 				glDrawArrays(mode, 0, vbo.numVerts);
 			}
+
+			OGL_ERROR_CHECK();
 		}
 	};
 
-	struct Texture2D : Object
+	struct Texture : virtual Object
+	{
+		virtual ~Texture() = default;
+	};
+
+	struct Texture2D : Texture
 	{
 	private:
 	public:
@@ -179,9 +232,41 @@ namespace gl
 			bind();
 		}
 
+		Texture2D(const void* data, int width, int height, GLenum imageFormat, GLenum dataType) :
+			Texture2D()
+		{
+			setTextureData(data, width, height, imageFormat, dataType);
+			setFilterMode(GL_NEAREST);
+		}
+
 		~Texture2D()
 		{
 			destroy();
+		}
+
+		NOT_COPYABLE_BUT_MOVEABLE(Texture2D,
+		{
+			std::swap(handle, other.handle);
+		});
+
+		void setTextureData(const void* data, int width, int height, GLenum imageFormat, GLenum dataType)
+		{
+			bind();
+
+			glTexImage2D(GL_TEXTURE_2D, 0, imageFormat, width, height, 0, imageFormat, dataType, data);
+			OGL_ERROR_CHECK();
+		}
+
+		void setWrapMode(GLenum mode)
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, mode);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, mode);
+		}
+
+		void setFilterMode(GLenum mode)
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mode);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mode);
 		}
 
 		void destroy() override
@@ -192,6 +277,101 @@ namespace gl
 
 		void bind() override { glBindTexture(GL_TEXTURE_2D, handle); }
 		void release() override { glBindTexture(GL_TEXTURE_2D, 0); }
+
+		int getWidth() const 
+		{ 
+			int w;
+			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+			return w;
+		}
+
+		int getHeight() const 
+		{
+			int h;
+			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+			return h;
+		}
+	};
+
+	struct DepthTexture : Texture
+	{
+		DepthTexture()
+		{
+			glGenRenderbuffers(1, &handle);
+			bind();
+		}
+
+		~DepthTexture()
+		{
+			glDeleteRenderbuffers(1, &handle);
+		}
+	};
+
+	struct FrameBuffer : Object
+	{
+	private:
+		std::vector<Texture*> targets;
+	public:
+		FrameBuffer()
+		{
+			glGenFramebuffers(1, &handle);
+			bind();
+		}
+
+		FrameBuffer(std::initializer_list<Texture*> targetList) :
+			FrameBuffer()
+		{
+			int index = 0;
+			for (auto* target : targetList)
+				attachTarget(index++, target);
+		}
+
+		~FrameBuffer()
+		{
+			destroy();
+		}
+
+		void attachTarget(int index, Texture* target)
+		{
+			bind();
+
+			if (auto* tex2d = dynamic_cast<Texture2D*>(target))
+			{
+				glFramebufferTexture(
+					GL_FRAMEBUFFER,
+					GL_COLOR_ATTACHMENT0 + index,
+					tex2d->getID(),
+					0
+				);
+			}
+			else if (auto* depthTex = dynamic_cast<DepthTexture*>(target))
+			{
+				glFramebufferRenderbuffer(
+					GL_FRAMEBUFFER,
+					GL_DEPTH_ATTACHMENT,
+					GL_RENDERBUFFER,
+					depthTex->getID()
+				);
+			}
+
+			targets.push_back(target);
+		}
+
+		void destroy() override
+		{
+			glDeleteFramebuffers(1, &handle);
+			handle = 0;
+		}
+
+		void bind() override
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, handle);
+		}
+
+		void release() override
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
 	};
 
 	struct Program : Object
@@ -246,14 +426,10 @@ namespace gl
 		bool compileShader(GLenum type, const char* source, std::initializer_list<const char*> defines)
 		{
 			std::string sourceString;
-			//const char* sourceArr[32] = {};
+			
+			errorString.clear();
 
 			GLuint shaderHandle = glCreateShader(type);
-
-			// fill source array with defines and the source
-			/*sourceArr[defines.size()] = source;
-			for (auto* define : defines)
-				sourceArr[*defines.begin() - define] = define;*/
 
 			for (auto* define : defines)
 			{
@@ -265,20 +441,22 @@ namespace gl
 
 			const char* src[] = { sourceString.c_str() };
 			glShaderSource(shaderHandle, 1, src, nullptr);
+			OGL_ERROR_CHECK();
 
 			glCompileShader(shaderHandle);
+			OGL_ERROR_CHECK();
 
 			GLint success;
 			glGetShaderiv(shaderHandle, GL_COMPILE_STATUS, &success);
+			OGL_ERROR_CHECK();
 
 			if (success == GL_FALSE)
 			{
-				GLint errLength = 2048;
+				GLint errLength = 0;
 
-				errorString.clear();
-				errorString.resize(errLength);
+				errorString.resize(4096);
 
-				glGetShaderInfoLog(shaderHandle, errLength, &errLength, (char*)errorString.c_str());
+				glGetShaderInfoLog(shaderHandle, 4096-1, &errLength, (char*)errorString.c_str());
 
 				errorString.resize(errLength+1);
 				
@@ -288,6 +466,7 @@ namespace gl
 
 			glAttachShader(handle, shaderHandle);
 			glDeleteShader(shaderHandle);
+			OGL_ERROR_CHECK();
 
 			return true;
 		}
@@ -295,19 +474,21 @@ namespace gl
 		bool link()
 		{
 			status = false;
+			errorString.clear();
+
 			glLinkProgram(handle);
+			OGL_ERROR_CHECK();
 
 			GLint success;
 			glGetProgramiv(handle, GL_LINK_STATUS, &success);
 
 			if (success == GL_FALSE)
 			{
-				GLint errLength = 2048;
+				GLint errLength = 0;
 
-				errorString.clear();
-				errorString.resize(errLength);
+				errorString.resize(4096);
 
-				glGetShaderInfoLog(handle, errLength, &errLength, (char*)errorString.c_str());
+				glGetShaderInfoLog(handle, 4096-1, &errLength, (char*)errorString.c_str());
 
 				errorString.resize(errLength);
 
@@ -346,11 +527,19 @@ namespace gl
 			glUseProgram(0);
 		}
 
+		void setSampler(const char* name, int loc, Texture2D* tex)
+		{
+			glActiveTexture(GL_TEXTURE0 + loc);
+			tex->bind();
+			setUniform(name, loc);
+		}
+
+		void setUniform(const char* name, int i) { glUniform1i(glGetUniformLocation(handle, name), i); }
 		void setUniform(const char* name, float v) { glUniform1f(glGetUniformLocation(handle, name), v); }
 		void setUniform(const char* name, float v1, float v2) { glUniform2f(glGetUniformLocation(handle, name), v1, v2); }
 		void setUniform(const char* name, float v1, float v2, float v3) { glUniform3f(glGetUniformLocation(handle, name), v1, v2, v3); }
 		void setUniform(const char* name, float v1, float v2, float v3, float v4) { glUniform4f(glGetUniformLocation(handle, name), v1, v2, v3, v4); }
-
-		OGLPP_GLM_UNIFORM_METHODS;
+		
+		OGL_GLM_UNIFORM_METHODS;
 	};
 }
