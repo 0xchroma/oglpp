@@ -1,6 +1,7 @@
 
 #define OGLPP_USE_GLAD
 #define OGLPP_USE_GLM
+#define OGLPP_AUTO_BIND
 #include "ogl.hpp"
 
 #include <cstdio>
@@ -40,7 +41,6 @@ out vec3 outColour;
 void main()
 {
 	outColour = texture(inputTexture, uv).xyz;
-	//outColour = vec3(1, 0, 1);
 }
 
 #endif
@@ -74,12 +74,21 @@ int main(int, const char**)
 			{ GL_FRAGMENT_SHADER, testSource, { "#version 330", "#define FRAGMENT_SHADER" } },
 		});
 
-		std::vector<char> testPixels(512 * 512 * 3, 0x255);
+		std::vector<uint32_t> pixels(512 * 512);
 
-		gl::Texture2D emptyTex(testPixels.data(), 512, 512, GL_RGB, GL_UNSIGNED_BYTE);
+		for (auto& p : pixels)
+			p = 0x00FF00FF;
+
+		gl::Texture2D emptyTex((const char*)pixels.data(), 512, 512, GL_RGBA, GL_UNSIGNED_BYTE);
 
 		if (!purpleShader.isValid())
 			printf("Program error: %s\n", purpleShader.getLastError().c_str());
+
+		gl::FrameBuffer fbo({
+			{ 0, new gl::Texture2D(1280, 720, GL_RGB, GL_UNSIGNED_BYTE) },
+			//{ 0, new gl::DepthTexture(1280, 720, GL_DEPTH_COMPONENT16) }
+		});
+		fbo.release();
 
 		while (!glfwWindowShouldClose(window))
 		{
@@ -90,15 +99,28 @@ int main(int, const char**)
 				glfwGetFramebufferSize(window, &w, &h);
 				glViewport(0, 0, w, h);
 			}
-			
+
+			fbo.bind();
 			glClearColor(0, 0, 0, 1);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-			
-			vertBuffer.bind();
+			glClear(GL_COLOR_BUFFER_BIT);
 
 			purpleShader.bind();
+			vertBuffer.bind();
 			purpleShader.setSampler("inputTexture", 0, &emptyTex);
-			
+
+			vertBuffer.draw();
+			fbo.release();
+
+			gl::FrameBuffer::bindDefaultBuffer();
+
+			glClearColor(1, 1, 1, 1);
+			glClear(GL_COLOR_BUFFER_BIT);
+
+			purpleShader.bind();
+			vertBuffer.bind();
+
+			purpleShader.setSampler("inputTexture", 0, fbo.getColourTarget(0));
+
 			vertBuffer.draw();
 
 			OGLPP_ERROR_CHECK();

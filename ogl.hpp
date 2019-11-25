@@ -21,6 +21,12 @@ void setUniform(const char* name, const glm::mat4& m) { glUniformMatrix4fv(glGet
 #define OGLPP_GLM_UNIFORM_METHODS 
 #endif
 
+#ifdef OGLPP_AUTO_BIND
+#define OGLPP_BIND() bind()
+#else
+#define OGLPP_BIND()
+#endif
+
 #include <algorithm>
 #include <initializer_list>
 #include <string>
@@ -40,6 +46,7 @@ void operator=(Name&& other) noexcept MOVER
 OGLPP_NOT_COPYABLE(Name) \
 OGLPP_MOVEABLE(Name, MOVER)
 
+// TODO: cross platform asserts
 #ifdef WIN32
 void _debugbreak();
 #define OGLPP_ASSERT(expr) if (!(expr)) __debugbreak();
@@ -48,7 +55,7 @@ void _debugbreak();
 #ifdef _DEBUG || defined(OGL_ASSERT_ON_ERROR)
 #define OGLPP_ERROR_CHECK() OGLPP_ASSERT(!gl::getError())
 #else
-#define OGLPP_ERROR_CHECK() void
+#define OGLPP_ERROR_CHECK()
 #endif
 
 namespace gl
@@ -70,6 +77,7 @@ namespace gl
 		GL_ERROR_CASE(GL_STACK_UNDERFLOW);
 		GL_ERROR_CASE(GL_STACK_OVERFLOW);
 		}
+#undef GL_ERROR_CASE
 
 		return nullptr;
 	}
@@ -85,6 +93,19 @@ namespace gl
 		virtual void release() const = 0;
 		GLuint getID() const { return handle; }
 		virtual bool isValid() const { return handle != 0; }
+	};
+
+	struct ScopedBind
+	{
+	private:
+		Object& object;
+	
+	public:
+		ScopedBind(Object& obj) : object(obj) { object.bind(); }
+		ScopedBind(Object* obj) : ScopedBind(*obj) {  }
+		~ScopedBind() { object.release(); }
+
+		operator bool() const { return true; }
 	};
 
 	struct VertexArray : Object
@@ -188,30 +209,26 @@ namespace gl
 			std::swap(ebo, other.ebo);
 		});
 
-		void bind() override 
+		void bind() const override
 		{
 			OGLPP_ASSERT(isValid());
 			glBindVertexArray(handle);
 			OGLPP_ERROR_CHECK();
 		}
 
-		void release() override 
+		void release() const override 
 		{
 			glBindVertexArray(0);
 		}
 
 		void draw(GLenum mode = GL_TRIANGLES)
 		{
-			OGLPP_ASSERT(isValid());
-
+			bind();
+			
 			if (ebo.handle)
-			{
 				glDrawElements(mode, ebo.numElems, GL_UNSIGNED_INT, nullptr);
-			}
 			else
-			{
 				glDrawArrays(mode, 0, vbo.numVerts);
-			}
 
 			OGLPP_ERROR_CHECK();
 		}
@@ -220,6 +237,8 @@ namespace gl
 	struct Texture : virtual Object
 	{
 		virtual ~Texture() = default;
+
+		virtual void resize(int width, int height) = 0;
 	};
 
 	struct Texture2D : Texture
@@ -230,6 +249,7 @@ namespace gl
 		{
 			glGenTextures(1, &handle);
 			bind();
+			OGLPP_ERROR_CHECK();
 		}
 
 		Texture2D(const void* data, int width, int height, GLenum imageFormat, GLenum dataType) :
@@ -237,6 +257,12 @@ namespace gl
 		{
 			setTextureData(data, width, height, imageFormat, dataType);
 			setFilterMode(GL_NEAREST);
+			OGLPP_ERROR_CHECK();
+		}
+
+		Texture2D(int width, int height, GLenum imageFormat, GLenum dataType) :
+			Texture2D(nullptr, width, height, imageFormat, dataType)
+		{
 		}
 
 		~Texture2D()
@@ -245,10 +271,7 @@ namespace gl
 			handle = 0;
 		}
 
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Texture2D,
-		{
-			std::swap(handle, other.handle);
-		});
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Texture2D, OGLPP_DEFAULT_MOVER);
 
 		void setTextureData(const void* data, int width, int height, GLenum imageFormat, GLenum dataType)
 		{
@@ -261,44 +284,59 @@ namespace gl
 		void setWrapMode(GLenum mode)
 		{
 			bind();
+
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, mode);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, mode);
+			OGLPP_ERROR_CHECK();
 		}
 
 		void setFilterMode(GLenum mode)
 		{
 			bind();
+
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mode);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mode);
+			OGLPP_ERROR_CHECK();
 		}
 
-		void bind() override 
+		void resize(int width, int height) override
+		{
+
+		}
+
+		void bind() const override 
 		{ 
 			OGLPP_ASSERT(isValid());
 			glBindTexture(GL_TEXTURE_2D, handle); 
+			OGLPP_ERROR_CHECK();
 		}
 		
-		void release() override 
+		void release() const override 
 		{
-			OGLPP_ASSERT(isValid());
 			glBindTexture(GL_TEXTURE_2D, 0); 
 		}
 
 		int getWidth() const 
-		{ 
+		{
+			int w;
+
 			bind();
 
-			int w;
 			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+			OGLPP_ERROR_CHECK();
+			
 			return w;
 		}
 
 		int getHeight() const 
 		{
+			int h;
+
 			bind();
 
-			int h;
 			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+			OGLPP_ERROR_CHECK();
+			
 			return h;
 		}
 	};
@@ -311,22 +349,41 @@ namespace gl
 			bind();
 		}
 
+		DepthTexture(int width, int height, GLenum format) :
+			DepthTexture()
+		{
+			glRenderbufferStorage(GL_RENDERBUFFER, format, width, height);
+			OGLPP_ERROR_CHECK();
+		}
+
 		~DepthTexture()
 		{
 			glDeleteRenderbuffers(1, &handle);
 		}
 
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(DepthTexture, {  });
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(DepthTexture, OGLPP_DEFAULT_MOVER);
 
-		void bind() override
+		void resize(int width, int height) override
+		{
+			GLint format;
+			bind();
+
+			glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &format);
+			OGLPP_ERROR_CHECK();
+			
+			glRenderbufferStorage(GL_RENDERBUFFER, (GLenum)format, width, height);
+			OGLPP_ERROR_CHECK();
+		}
+
+		void bind() const override
 		{
 			OGLPP_ASSERT(isValid());
-			glBindRenderbuffer(GL_RENDERBUFFER, handle); 
+			glBindRenderbuffer(GL_RENDERBUFFER, handle);
+			OGLPP_ERROR_CHECK();
 		}
 		
-		void release() override 
+		void release() const override 
 		{ 
-			OGLPP_ASSERT(isValid());
 			glBindRenderbuffer(GL_RENDERBUFFER, 0); 
 		}
 	};
@@ -348,12 +405,21 @@ namespace gl
 		{
 			for (const auto& elem : list)
 				attachTarget(elem.second, elem.first);
+
+			isReady();
 		}
 
 		~FrameBuffer()
 		{
 			glDeleteFramebuffers(1, &handle);
 		}
+
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(FrameBuffer,
+		{
+			std::swap(handle, other.handle);
+			std::swap(colourTargets, other.colourTargets);
+			std::swap(depthTarget, other.depthTarget);
+		});
 
 		Texture* getColourTarget(int index) const { return colourTargets[index]; }
 		Texture* getDepthTarget() const { return depthTarget; }
@@ -362,49 +428,85 @@ namespace gl
 		{
 			bind();
 			
-			if (auto* tex2d = dynamic_cast<Texture2D*>(target))
+			if (auto* tex = dynamic_cast<Texture2D*>(target))
 			{
-				// check we don't have index collisions for colour targets
-				if (index >= 0)
-				{
-					for (const auto& targetEntry : colourTargets)
-						OGLPP_ASSERT(targetEntry.index != index);
-				}
-
+				ScopedBind binder(tex);
 				glFramebufferTexture(
 					GL_FRAMEBUFFER,
 					GL_COLOR_ATTACHMENT0 + index,
-					tex2d->getID(),
+					tex->getID(),
 					0
 				);
+				
+				OGLPP_ASSERT(index >= 0 && index < 8);
+				colourTargets[index] = target;
 			}
-			else if (auto* depthTex = dynamic_cast<DepthTexture*>(target))
+			else if (auto* depth = dynamic_cast<DepthTexture*>(target))
 			{
 				// check we don't already have a depth target attached to this framebuffer
-				for (const auto& depthTarget : targets)
-					OGLPP_ASSERT(!dynamic_cast<const DepthTexture*>(depthTarget.target));
-
+				OGLPP_ASSERT(!depthTarget);
+				
+				ScopedBind binder(depth);
 				glFramebufferRenderbuffer(
 					GL_FRAMEBUFFER,
 					GL_DEPTH_ATTACHMENT,
 					GL_RENDERBUFFER,
-					depthTex->getID()
+					depth->getID()
 				);
+
+				depthTarget = depth;
 			}
 
-			targets.push_back({ index, target });
 			OGLPP_ERROR_CHECK();
 		}
 
-		void bind() override
+		void resize(int width, int height)
+		{
+			for (auto* target : colourTargets)
+				if (target)
+					target->resize(width, height);
+
+			if (depthTarget)
+				depthTarget->resize(width, height);
+		}
+
+		void bind() const override
 		{
 			OGLPP_ASSERT(isValid());
 			glBindFramebuffer(GL_FRAMEBUFFER, handle);
+			OGLPP_ERROR_CHECK();
 		}
 
-		void release() override
+		void release() const override
 		{
-			OGLPP_ASSERT(isValid());
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
+
+		bool isReady() const
+		{
+			return glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE;
+		}
+
+		void draw() const
+		{
+			int usedSlots = 0;
+			GLenum targets[9]{};
+
+			for (int i = 0; i < 8; i++)
+			{
+				if (colourTargets[i])
+					targets[usedSlots++] = GL_COLOR_ATTACHMENT0 + i;
+			}
+
+			if (depthTarget)
+				targets[usedSlots++] = GL_DEPTH_ATTACHMENT;
+
+			glDrawBuffers(usedSlots, targets);
+			OGLPP_ERROR_CHECK();
+		}
+
+		static void bindDefaultBuffer()
+		{
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		}
 	};
@@ -532,31 +634,32 @@ namespace gl
 
 			status = true;
 
+			OGLPP_ERROR_CHECK();
+
 			return true;
 		}
 
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Program,
-		{
-			std::swap(handle, other.handle);
-		});
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Program, OGLPP_DEFAULT_MOVER);
 
 		void reset()
 		{
 			glDeleteProgram(handle);
 			handle = glCreateProgram();
+			OGLPP_ERROR_CHECK();
 		}
 
-		void bind() override
+		void bind() const override
 		{
 			glUseProgram(handle);
+			OGLPP_ERROR_CHECK();
 		}
 
-		void release() override
+		void release() const override
 		{
 			glUseProgram(0);
 		}
 
-		void setSampler(const char* name, int loc, Texture2D* tex)
+		void setSampler(const char* name, int loc, Texture* tex)
 		{
 			glActiveTexture(GL_TEXTURE0 + loc);
 			tex->bind();
