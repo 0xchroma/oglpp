@@ -101,7 +101,7 @@ int main(int, const char**)
 			
 			vertBuffer.draw();
 
-			OGL_ERROR_CHECK();
+			OGLPP_ERROR_CHECK();
 			glfwSwapBuffers(window);
 		}
 
