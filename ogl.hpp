@@ -4,23 +4,6 @@
 #include <glad/glad.h>
 #endif
 
-#ifdef OGLPP_USE_GLM
-#include <glm/glm.hpp>
-#include <glm/mat4x4.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#define OGLPP_GLM_UNIFORM_METHODS \
-void setUniform(const char* name, const glm::vec2& v) { glUniform2fv(glGetUniformLocation(handle, name), 2, glm::value_ptr(v)); } \
-void setUniform(const char* name, const glm::vec3& v) { glUniform3fv(glGetUniformLocation(handle, name), 3, glm::value_ptr(v)); } \
-void setUniform(const char* name, const glm::vec4& v) { glUniform4fv(glGetUniformLocation(handle, name), 4, glm::value_ptr(v)); } \
-void setUniform(const char* name, const glm::mat4& m) { glUniformMatrix4fv(glGetUniformLocation(handle, name), 1, GL_FALSE, glm::value_ptr(m)); }
-
-#endif
-
-#ifndef OGLPP_GLM_UNIFORM_METHODS
-#define OGLPP_GLM_UNIFORM_METHODS 
-#endif
-
 #ifdef OGLPP_AUTO_BIND
 #define OGLPP_BIND() bind()
 #else
@@ -31,6 +14,7 @@ void setUniform(const char* name, const glm::mat4& m) { glUniformMatrix4fv(glGet
 #include <initializer_list>
 #include <string>
 #include <vector>
+#include <cassert>
 
 #define OGLPP_NOT_COPYABLE(Name) \
 Name(const Name& other) = delete; \
@@ -46,13 +30,9 @@ void operator=(Name&& other) noexcept MOVER
 OGLPP_NOT_COPYABLE(Name) \
 OGLPP_MOVEABLE(Name, MOVER)
 
-// TODO: cross platform asserts
-#ifdef WIN32
-void _debugbreak();
-#define OGLPP_ASSERT(expr) if (!(expr)) __debugbreak();
-#endif
+#define OGLPP_ASSERT(expr) assert(expr);
 
-#ifdef _DEBUG || defined(OGL_ASSERT_ON_ERROR)
+#ifdef _DEBUG
 #define OGLPP_ERROR_CHECK() OGLPP_ASSERT(!gl::getError())
 #else
 #define OGLPP_ERROR_CHECK()
@@ -82,54 +62,30 @@ namespace gl
 		return nullptr;
 	}
 
-	struct Object
-	{
-	protected:
-		GLuint handle = 0;
-		virtual ~Object() = default;
-
-	public:
-		virtual void bind() const = 0;
-		virtual void release() const = 0;
-		GLuint getID() const { return handle; }
-		virtual bool isValid() const { return handle != 0; }
-	};
-
-	struct ScopedBind
-	{
-	private:
-		Object& object;
-	
-	public:
-		ScopedBind(Object& obj) : object(obj) { object.bind(); }
-		ScopedBind(Object* obj) : ScopedBind(*obj) {  }
-		~ScopedBind() { object.release(); }
-
-		operator bool() const { return true; }
-	};
-
-	struct VertexArray : Object
+	struct VertexArray
 	{
 		struct Layout 
 		{ 
-			int index = 0;
+			int index{};
 			GLenum type = GL_FLOAT;
-			int size = 0; 
-			int offset = 0;
+			int size{};
+			int offset{};
 		};
 
 	private:
 		struct
 		{
-			int numVerts = 0;
-			GLuint handle = 0;
+			int numVerts{};
+			GLuint handle{};
 		} vbo;
 
 		struct ElementBuffer
 		{
-			int numElems = 0;
-			GLuint handle = 0;
+			int numElems{};
+			GLuint handle{};
 		} ebo;
+
+		GLuint handle{};
 
 	public:
 		VertexArray()
@@ -140,7 +96,7 @@ namespace gl
 		}
 
 		template<typename VertexT>
-		VertexArray(const VertexT* verts, int numVerts, std::initializer_list<Layout> layout) :
+		VertexArray(const VertexT* verts, int numVerts, std::initializer_list<Layout>&& layout) :
 			VertexArray()
 		{
 			setVertexData(verts, numVerts, std::move(layout));
@@ -148,7 +104,7 @@ namespace gl
 		}
 
 		template<typename VertexT>
-		VertexArray(const VertexT* verts, int numVerts, const uint32_t* indices, int numIndices, std::initializer_list<Layout> layout) :
+		VertexArray(const VertexT* verts, int numVerts, const uint32_t* indices, int numIndices, std::initializer_list<Layout>&& layout) :
 			VertexArray()
 		{
 			setVertexData(verts, numVerts, std::move(layout));
@@ -162,8 +118,11 @@ namespace gl
 			handle = 0;
 		}
 
+		auto getHandle() const { return handle; }
+		bool isValid() const { return handle; }
+
 		template<typename VertexT>
-		void setVertexData(const VertexT* verts, int numVerts, std::initializer_list<Layout> layout)
+		void setVertexData(const VertexT* verts, int numVerts, std::initializer_list<Layout>&& layout)
 		{
 			bind();
 
@@ -181,7 +140,8 @@ namespace gl
 			for (auto elem : layout)
 			{
 				glEnableVertexAttribArray(elem.index);
-				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(Vertex), (void*)elem.offset);
+				const uintptr_t offset = elem.offset;
+				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(Vertex), (void*)offset);
 				OGLPP_ERROR_CHECK();
 			}
 		}
@@ -209,14 +169,14 @@ namespace gl
 			std::swap(ebo, other.ebo);
 		});
 
-		void bind() const override
+		void bind() const
 		{
 			OGLPP_ASSERT(isValid());
 			glBindVertexArray(handle);
 			OGLPP_ERROR_CHECK();
 		}
 
-		void release() const override 
+		void release() const
 		{
 			glBindVertexArray(0);
 		}
@@ -234,16 +194,16 @@ namespace gl
 		}
 	};
 
-	struct Texture : virtual Object
+	struct Texture
 	{
 		virtual ~Texture() = default;
-
 		virtual void resize(int width, int height) = 0;
 	};
 
 	struct Texture2D : Texture
 	{
 	private:
+		GLuint handle{};
 	public:
 		Texture2D()
 		{
@@ -273,6 +233,9 @@ namespace gl
 
 		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Texture2D, OGLPP_DEFAULT_MOVER);
 
+		auto getHandle() const { return handle; }
+		bool isValid() const { return handle; }
+
 		void setTextureData(const void* data, int width, int height, GLenum imageFormat, GLenum dataType)
 		{
 			bind();
@@ -301,17 +264,16 @@ namespace gl
 
 		void resize(int width, int height) override
 		{
-
 		}
 
-		void bind() const override 
+		void bind() const
 		{ 
 			OGLPP_ASSERT(isValid());
 			glBindTexture(GL_TEXTURE_2D, handle); 
 			OGLPP_ERROR_CHECK();
 		}
 		
-		void release() const override 
+		void release() const
 		{
 			glBindTexture(GL_TEXTURE_2D, 0); 
 		}
@@ -343,6 +305,9 @@ namespace gl
 
 	struct DepthTexture : Texture
 	{
+	private:
+		GLuint handle{};
+	public:
 		DepthTexture()
 		{
 			glGenRenderbuffers(1, &handle);
@@ -363,6 +328,9 @@ namespace gl
 
 		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(DepthTexture, OGLPP_DEFAULT_MOVER);
 
+		auto getHandle() const { return handle; }
+		bool isValid() const { return handle; }
+
 		void resize(int width, int height) override
 		{
 			GLint format;
@@ -375,24 +343,26 @@ namespace gl
 			OGLPP_ERROR_CHECK();
 		}
 
-		void bind() const override
+		void bind() const
 		{
 			OGLPP_ASSERT(isValid());
 			glBindRenderbuffer(GL_RENDERBUFFER, handle);
 			OGLPP_ERROR_CHECK();
 		}
 		
-		void release() const override 
+		void release() const
 		{ 
 			glBindRenderbuffer(GL_RENDERBUFFER, 0); 
 		}
 	};
 
-	struct FrameBuffer : Object
+	struct FrameBuffer
 	{
 	private:
-		Texture* colourTargets[8]{ nullptr };
-		Texture* depthTarget{ nullptr };
+		GLuint handle{};
+
+		std::vector<Texture2D*> colourTargets;
+		DepthTexture* depthTarget{};
 	public:
 		FrameBuffer()
 		{
@@ -404,7 +374,10 @@ namespace gl
 			FrameBuffer()
 		{
 			for (const auto& elem : list)
-				attachTarget(elem.second, elem.first);
+				if (auto* tex2d = dynamic_cast<Texture2D*>(elem.second))
+					attachColourTarget(tex2d, elem.first);
+				else
+					attachDepthTarget((DepthTexture*)elem.second);
 
 			isReady();
 		}
@@ -421,41 +394,41 @@ namespace gl
 			std::swap(depthTarget, other.depthTarget);
 		});
 
-		Texture* getColourTarget(int index) const { return colourTargets[index]; }
-		Texture* getDepthTarget() const { return depthTarget; }
+		auto getHandle() const { return handle; }
+		auto isValid() const { return handle; }
 
-		void attachTarget(Texture* target, int index = -1)
+		Texture2D* getColourTarget(int index) const { return colourTargets[index]; }
+		DepthTexture* getDepthTarget() const { return depthTarget; }
+
+		void attachColourTarget(Texture2D* target, int index = -1)
 		{
 			bind();
-			
-			if (auto* tex = dynamic_cast<Texture2D*>(target))
-			{
-				ScopedBind binder(tex);
-				glFramebufferTexture(
-					GL_FRAMEBUFFER,
-					GL_COLOR_ATTACHMENT0 + index,
-					tex->getID(),
-					0
-				);
-				
-				OGLPP_ASSERT(index >= 0 && index < 8);
-				colourTargets[index] = target;
-			}
-			else if (auto* depth = dynamic_cast<DepthTexture*>(target))
-			{
-				// check we don't already have a depth target attached to this framebuffer
-				OGLPP_ASSERT(!depthTarget);
-				
-				ScopedBind binder(depth);
-				glFramebufferRenderbuffer(
-					GL_FRAMEBUFFER,
-					GL_DEPTH_ATTACHMENT,
-					GL_RENDERBUFFER,
-					depth->getID()
-				);
+	
+			glFramebufferTexture(
+				GL_FRAMEBUFFER,
+				GL_COLOR_ATTACHMENT0 + index,
+				target->getHandle(),
+				0
+			);
 
-				depthTarget = depth;
-			}
+			colourTargets.push_back(target);
+		}
+
+		void attachDepthTarget(DepthTexture* depth)
+		{
+			bind();
+
+			// check we don't already have a depth target attached to this framebuffer
+			OGLPP_ASSERT(!depthTarget);
+
+			glFramebufferRenderbuffer(
+				GL_FRAMEBUFFER,
+				GL_DEPTH_ATTACHMENT,
+				GL_RENDERBUFFER,
+				depth->getHandle()
+			);
+
+			depthTarget = depth;
 
 			OGLPP_ERROR_CHECK();
 		}
@@ -463,21 +436,20 @@ namespace gl
 		void resize(int width, int height)
 		{
 			for (auto* target : colourTargets)
-				if (target)
 					target->resize(width, height);
 
 			if (depthTarget)
 				depthTarget->resize(width, height);
 		}
 
-		void bind() const override
+		void bind() const
 		{
 			OGLPP_ASSERT(isValid());
 			glBindFramebuffer(GL_FRAMEBUFFER, handle);
 			OGLPP_ERROR_CHECK();
 		}
 
-		void release() const override
+		void release() const
 		{
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		}
@@ -490,16 +462,13 @@ namespace gl
 		void draw() const
 		{
 			int usedSlots = 0;
-			GLenum targets[9]{};
+			GLenum targets[32]{};
 
-			for (int i = 0; i < 8; i++)
-			{
-				if (colourTargets[i])
-					targets[usedSlots++] = GL_COLOR_ATTACHMENT0 + i;
-			}
+			for (int i = 0; i < colourTargets.size(); i++)
+				targets[i] = GL_COLOR_ATTACHMENT0 + i;
 
 			if (depthTarget)
-				targets[usedSlots++] = GL_DEPTH_ATTACHMENT;
+				targets[colourTargets.size()] = GL_DEPTH_ATTACHMENT;
 
 			glDrawBuffers(usedSlots, targets);
 			OGLPP_ERROR_CHECK();
@@ -511,7 +480,7 @@ namespace gl
 		}
 	};
 
-	struct Program : Object
+	struct Program
 	{
 		struct Shader 
 		{
@@ -520,6 +489,7 @@ namespace gl
 			std::initializer_list<const char*> defines;
 		};
 	private:
+		GLuint handle{};
 		std::string errorString;
 		bool status = false;
 	public:
@@ -551,7 +521,9 @@ namespace gl
 			glDeleteProgram(handle);
 		}
 
-		bool isValid() const override { return status; }
+		auto getHandle() const { return handle; }
+		auto isValid() const { return handle; }
+
 		const std::string& getLastError() const { return errorString; }
 
 		// compiles a shader, and attaches if successful. 
@@ -595,7 +567,7 @@ namespace gl
 
 				glGetShaderInfoLog(shaderHandle, 4096-1, &errLength, (char*)errorString.c_str());
 
-				errorString.resize(errLength+1);
+				errorString.resize(errLength + 1);
 				
 				glDeleteShader(shaderHandle);
 				return false;
@@ -648,30 +620,46 @@ namespace gl
 			OGLPP_ERROR_CHECK();
 		}
 
-		void bind() const override
+		void bind() const
 		{
+			OGLPP_ASSERT(isValid());
 			glUseProgram(handle);
 			OGLPP_ERROR_CHECK();
 		}
 
-		void release() const override
+		void release() const
 		{
 			glUseProgram(0);
 		}
 
-		void setSampler(const char* name, int loc, Texture* tex)
+		void setSampler(const char* name, int loc, Texture2D* tex)
 		{
 			glActiveTexture(GL_TEXTURE0 + loc);
 			tex->bind();
 			setUniform(name, loc);
 		}
 
-		void setUniform(const char* name, int i) { glUniform1i(glGetUniformLocation(handle, name), i); }
-		void setUniform(const char* name, float v) { glUniform1f(glGetUniformLocation(handle, name), v); }
-		void setUniform(const char* name, float v1, float v2) { glUniform2f(glGetUniformLocation(handle, name), v1, v2); }
-		void setUniform(const char* name, float v1, float v2, float v3) { glUniform3f(glGetUniformLocation(handle, name), v1, v2, v3); }
-		void setUniform(const char* name, float v1, float v2, float v3, float v4) { glUniform4f(glGetUniformLocation(handle, name), v1, v2, v3, v4); }
-		
-		OGLPP_GLM_UNIFORM_METHODS;
+		void setSampler(const char* name, int loc, DepthTexture* tex)
+		{
+			glActiveTexture(GL_TEXTURE0 + loc);
+			tex->bind();
+			setUniform(name, loc);
+		}
+
+		auto getUniformLocation(const char* name) const 
+		{ 
+			const auto index = glGetUniformLocation(handle, name);
+
+			OGLPP_ASSERT(index != -1);
+
+			return index;
+		}
+
+		template<typename T>
+		void setUniform(const char* name, const T& value) { gl::setProgramUniform(getUniformLocation(name), value); }
 	};
+
+	static inline void setProgramUniform(GLuint index, GLuint i) { glUniform1i(index, i); }
+	static inline void setProgramUniform(GLuint index, int i) { glUniform1i(index, i); }
+	static inline void setProgramUniform(GLuint index, float v) { glUniform1f(index, v); }
 }
