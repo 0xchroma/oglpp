@@ -1,34 +1,15 @@
 #pragma once
 
-#ifdef OGLPP_USE_GLAD
-#include <glad/glad.h>
-#endif
+#include <initializer_list>
+#include <string>
+#include <vector>
+#include <cassert>
 
 #ifdef OGLPP_AUTO_BIND
 #define OGLPP_BIND() bind()
 #else
 #define OGLPP_BIND()
 #endif
-
-#include <algorithm>
-#include <initializer_list>
-#include <string>
-#include <vector>
-#include <cassert>
-
-#define OGLPP_NOT_COPYABLE(Name) \
-Name(const Name& other) = delete; \
-void operator=(const Name& other) = delete;
-
-#define OGLPP_DEFAULT_MOVER { std::swap(handle, other.handle); }
-
-#define OGLPP_MOVEABLE(Name, MOVER) \
-Name(Name&& other) noexcept { std::swap(*this, other); } \
-void operator=(Name&& other) noexcept MOVER 
-
-#define OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Name, MOVER) \
-OGLPP_NOT_COPYABLE(Name) \
-OGLPP_MOVEABLE(Name, MOVER)
 
 #define OGLPP_ASSERT(expr) assert(expr);
 
@@ -37,6 +18,18 @@ OGLPP_MOVEABLE(Name, MOVER)
 #else
 #define OGLPP_ERROR_CHECK()
 #endif
+
+#define OGLPP_NOT_COPYABLE(Name) \
+Name(const Name& other) = delete; \
+void operator=(const Name& other) = delete;
+
+#define OGLPP_MOVEABLE(Name, MOVER) \
+Name(Name&& other) noexcept { std::swap(*this, other); } \
+void operator=(Name&& other) noexcept MOVER 
+
+#define OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Name, MOVER) \
+OGLPP_NOT_COPYABLE(Name) \
+OGLPP_MOVEABLE(Name, MOVER)
 
 namespace gl
 {
@@ -118,6 +111,13 @@ namespace gl
 			handle = 0;
 		}
 
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(VertexArray,
+			{
+				std::swap(handle, other.handle);
+				std::swap(vbo, other.vbo);
+				std::swap(ebo, other.ebo);
+			});
+
 		auto getHandle() const { return handle; }
 		bool isValid() const { return handle; }
 
@@ -161,13 +161,6 @@ namespace gl
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(uint32_t), indices, GL_STATIC_DRAW);
 			OGLPP_ERROR_CHECK();
 		}
-
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(VertexArray, 
-		{
-			std::swap(handle, other.handle);
-			std::swap(vbo, other.vbo);
-			std::swap(ebo, other.ebo);
-		});
 
 		void bind() const
 		{
@@ -231,7 +224,7 @@ namespace gl
 			handle = 0;
 		}
 
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Texture2D, OGLPP_DEFAULT_MOVER);
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Texture2D, { std::swap(handle, other.handle); });
 
 		auto getHandle() const { return handle; }
 		bool isValid() const { return handle; }
@@ -326,7 +319,7 @@ namespace gl
 			glDeleteRenderbuffers(1, &handle);
 		}
 
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(DepthTexture, OGLPP_DEFAULT_MOVER);
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(DepthTexture, { std::swap(handle, other.handle); });
 
 		auto getHandle() const { return handle; }
 		bool isValid() const { return handle; }
@@ -491,7 +484,7 @@ namespace gl
 	private:
 		GLuint handle{};
 		std::string errorString;
-		bool status = false;
+
 	public:
 		Program()
 		{
@@ -520,6 +513,12 @@ namespace gl
 		{
 			glDeleteProgram(handle);
 		}
+
+		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Program,
+			{
+				std::swap(handle, other.handle);
+				std::swap(errorString, other.errorString);
+			});
 
 		auto getHandle() const { return handle; }
 		auto isValid() const { return handle; }
@@ -582,7 +581,6 @@ namespace gl
 
 		bool link()
 		{
-			status = false;
 			errorString.clear();
 
 			glLinkProgram(handle);
@@ -599,19 +597,18 @@ namespace gl
 
 				glGetShaderInfoLog(handle, 4096-1, &errLength, (char*)errorString.c_str());
 
-				errorString.resize(errLength);
+				errorString.resize(errLength + 1);
+
+				glDeleteProgram(handle);
+				handle = 0;
 
 				return false;
 			}
-
-			status = true;
 
 			OGLPP_ERROR_CHECK();
 
 			return true;
 		}
-
-		OGLPP_NOT_COPYABLE_BUT_MOVEABLE(Program, OGLPP_DEFAULT_MOVER);
 
 		void reset()
 		{
