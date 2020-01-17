@@ -46,7 +46,7 @@ out vec3 outColour;
 
 void main()
 {
-	outColour = mix(vec3(1, 0, 1), texture(inputTex, uv).rgb, textureEnabled);
+	outColour = vec3(1, 0, 1); // mix(vec3(1, 0, 1), texture(inputTex, uv).rgb, textureEnabled);
 }
 
 #endif
@@ -61,72 +61,12 @@ namespace gl
 	void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
 }
 
-struct Object;
-
 static GLFWwindow* window{};
 static gl::Program* textureShader{};
 static gl::VertexArray* quadVBO{};
-static std::vector<Object*> objects;
 static glm::ivec2 windowRes{};
 
-static glm::vec2 getMousePosition()
-{
-	double x, y;
-
-	glfwGetCursorPos(window, &x, &y);
-
-	return { x, y};
-}
-
-struct Object
-{
-	virtual ~Object() = default;
-
-	struct {
-	public:
-		glm::vec3 position{};
-		float rotation{ 0 };
-		glm::vec3 scale{ 1, 1, 1 };
-
-		const glm::mat4& getMatrix() const
-		{
-			glm::mat4 model{1};
-
-			model = glm::translate(model, glm::vec3(position));
-			
-			// center for rotation
-			model = glm::translate(model, 0.5f * scale);
-			model = glm::rotate(model, rotation, { 0, 0, 1 });
-			model = glm::translate(model, -0.5f * scale);
-			model = glm::scale(model, scale);
-			
-			return model;
-		}
-
-	} transform;
-
-	virtual void update() {}
-	virtual void render(const glm::mat4& pvMat) {}
-};
-
-struct Ball : Object
-{
-	virtual void update()
-	{
-		
-	}
-
-	virtual void render(const glm::mat4& pvMat) override
-	{
-		quadVBO->bind();
-		textureShader->bind();
-
-		textureShader->setUniform("mvp", pvMat * transform.getMatrix());
-		quadVBO->draw();
-	}
-};
-
-void initGLStuff()
+static void initGLStuff()
 {
 	gladLoadGL();
 
@@ -178,8 +118,6 @@ int main(int, const char**)
 		
 		glfwSetTime(0);
 
-		objects.push_back(new Ball());
-
 		while (!glfwWindowShouldClose(window))
 		{
 			glfwPollEvents();
@@ -193,16 +131,12 @@ int main(int, const char**)
 			glClearColor(0, 0, 0, 1);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-			const float ratioW = windowRes.x;
-			const float ratioH = windowRes.y;
-
-			glm::mat4 proj = glm::ortho<float>(0, 1, 1, 0, -1.f, 1.f);
+			quadVBO->bind();
 			
-			for (auto* object : objects)
-			{
-				//object->update();
-				object->render(proj);
-			}
+			textureShader->bind();
+			textureShader->setUniform("mvp", glm::mat4(1));
+
+			quadVBO->draw();
 
 			OGLPP_ERROR_CHECK();
 			glfwSwapBuffers(window);

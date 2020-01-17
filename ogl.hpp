@@ -14,7 +14,7 @@
 #define OGLPP_ASSERT(expr) assert(expr);
 
 #ifdef _DEBUG
-#define OGLPP_ERROR_CHECK() OGLPP_ASSERT(!gl::getError())
+#define OGLPP_ERROR_CHECK() OGLPP_ASSERT(!(gl::getError()))
 #else
 #define OGLPP_ERROR_CHECK()
 #endif
@@ -55,6 +55,9 @@ namespace gl
 		return nullptr;
 	}
 
+	// This is technically an incorrect way to structure a VBO
+	// but this is my typical use.
+	// I will change it when I use it differently
 	struct VertexArray
 	{
 		struct Layout 
@@ -66,7 +69,7 @@ namespace gl
 		};
 
 	private:
-		struct
+		struct VertexBuffer
 		{
 			int numVerts{};
 			GLuint handle{};
