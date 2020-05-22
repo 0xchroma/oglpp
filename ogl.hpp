@@ -5,12 +5,6 @@
 #include <vector>
 #include <cassert>
 
-#ifdef OGLPP_AUTO_BIND
-#define OGLPP_BIND() bind()
-#else
-#define OGLPP_BIND()
-#endif
-
 #define OGLPP_ASSERT(expr) assert(expr);
 
 #ifdef _DEBUG
@@ -55,9 +49,6 @@ namespace gl
 		return nullptr;
 	}
 
-	// This is technically an incorrect way to structure a VBO
-	// but this is my typical use.
-	// I will change it when I use it differently
 	struct VertexArray
 	{
 		struct Layout 
@@ -144,7 +135,7 @@ namespace gl
 			{
 				glEnableVertexAttribArray(elem.index);
 				const uintptr_t offset = elem.offset;
-				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(Vertex), (void*)offset);
+				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(VertexT), (void*)offset);
 				OGLPP_ERROR_CHECK();
 			}
 		}
