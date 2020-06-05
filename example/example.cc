@@ -1,58 +1,11 @@
-
-
-#define OGLPP_AUTO_BIND
 #include <glad/glad.h>
-#include "ogl.hpp"
-
-#include <cstdio>
-#include <memory>
 #include <GLFW/glfw3.h>
 
-#include <glm/glm.hpp>
-#include <glm/mat4x4.hpp>
-#include <glm/gtc/type_ptr.hpp>
+#include "../ogl.hpp"
 
-struct Vertex
-{
-	glm::vec3 position;
-	glm::vec2 texcoord;
-};
+#include "glm/glm/glm.hpp"
+#include "glm/glm/gtc/type_ptr.hpp"
 
-const char* textureShaderSource = R"(
-
-#if defined(VERTEX_SHADER)
-
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec2 texcoord;
-
-out vec2 uv;
-
-uniform mat4 mvp;
-
-void main()
-{
-	gl_Position = mvp * vec4(position, 1);
-	uv = texcoord;
-}
-
-#elif defined(FRAGMENT_SHADER)
-
-in vec2 uv;
-
-uniform float textureEnabled;
-uniform sampler2D inputTex;
-
-out vec3 outColour;
-
-void main()
-{
-	outColour = vec3(1, 0, 1); // mix(vec3(1, 0, 1), texture(inputTex, uv).rgb, textureEnabled);
-}
-
-#endif
-)";
-
-// uniform handlers for gl::Program
 namespace gl
 {
 	void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 1, glm::value_ptr(v)); }
@@ -61,89 +14,113 @@ namespace gl
 	void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
 }
 
-static GLFWwindow* window{};
-static gl::Program* textureShader{};
-static gl::VertexArray* quadVBO{};
-static glm::ivec2 windowRes{};
+static const glm::vec3 triangle[3]{
+	{ -1, -1, 0 },
+	{ 0, 1, 0 },
+	{ 1, -1, 0 }
+};
 
-static void initGLStuff()
+static const char* shaderCode = R"(
+
+#ifdef VERT_SHADER
+
+layout (location = 0) in vec3 pos;
+
+uniform mat4 mvp;
+
+void main()
 {
-	gladLoadGL();
+	gl_Position = mvp * vec4(pos.xyz, 1);
+}
 
-	glEnable(GL_DEPTH_TEST);
+#endif
 
-	const Vertex verts[] = {
-		{ { -1,  1, 0  },	{ 0, 1 } },		// 0 top left
-		{ {  1,  1, 0  },	{ 1, 1 } },		// 1 top right
-		{ {  1, -1, 0  },	{ 1, 0 } },		// 2 bottom right
-		{ { -1, -1, 0  },	{ 0, 0 } }		// 3 bottom left
-	};
+#ifdef FRAG_SHADER
 
-	const uint32_t indices[] = {
-		3, 0, 1,
-		3, 2, 1
-	};
+uniform vec3 diffuse;
 
-	quadVBO = new gl::VertexArray(
-		verts, 4,
-		indices, 6,
+out vec3 outColour;
+
+void main()
+{
+	outColour = diffuse;
+}
+
+#endif
+
+)";
+
+static gl::Program* purpleShader{};
+static gl::VertexArray* triangleBuffer{};
+
+static void init()
+{
+	purpleShader = new gl::Program(
 		{
-			{ 0, GL_FLOAT,	3, offsetof(Vertex, position) },
-			{ 1, GL_INT,	2, offsetof(Vertex, texcoord) }
+			{ GL_VERTEX_SHADER, shaderCode,		{ "#version 330", "#define VERT_SHADER" } },
+			{ GL_FRAGMENT_SHADER, shaderCode,	{ "#version 330", "#define FRAG_SHADER" } }
 		}
 	);
 
-	textureShader = new gl::Program({
-		{ GL_VERTEX_SHADER,		textureShaderSource, { "#version 330", "#define VERTEX_SHADER" } },
-		{ GL_FRAGMENT_SHADER,	textureShaderSource, { "#version 330", "#define FRAGMENT_SHADER" } }
-	});
-
-	if (!textureShader->isValid())
+	triangleBuffer = new gl::VertexArray(triangle, 3,
+		{
+			{ 0, GL_FLOAT, 3, 0 }
+		}
+	);
+	
+	if (!purpleShader->isValid())
 	{
-		printf("Program error: %s\n", textureShader->getLastError().c_str());
-		assert(false);
+		printf("shader error: %s\n", purpleShader->getLastError().c_str());
+		getchar();
 	}
 }
 
-int main(int, const char**)
+static void render(double time, int w, int h)
+{
+	auto perspective = glm::perspectiveFov<float>(glm::degrees<float>(45.f), w, h, 0.1, 100);
+	auto view = glm::lookAt<float>(glm::vec3(0, 0, 2), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+	auto model = glm::identity<glm::mat4>();
+
+	glClearColor(0.1, 0.1, 0.1, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	triangleBuffer->bind();
+	purpleShader->bind();
+
+	purpleShader->setUniform<glm::vec3>("diffuse", { 0.3, 0.3, 0.3 });
+	purpleShader->setUniform<glm::mat4>("mvp", perspective * view * model);
+
+	triangleBuffer->draw();
+}
+
+int main(int argc, const char** argv)
 {
 	glfwInit();
 
-	if ((window = glfwCreateWindow(1280, 720, "example", nullptr, nullptr)))
+	auto* window = glfwCreateWindow(512, 512, "", nullptr, nullptr);
+
+	glfwMakeContextCurrent(window);
+	gladLoadGL();
+
+	init();
+
+	while (!glfwWindowShouldClose(window))
 	{
-		glfwMakeContextCurrent(window);
-		glfwSwapInterval(1);
+		glfwPollEvents();
 
-		initGLStuff();
-		
-		glfwSetTime(0);
+		int w, h;
+		glfwGetFramebufferSize(window, &w, &h);
+		glViewport(0, 0, w, h);
 
-		while (!glfwWindowShouldClose(window))
-		{
-			glfwPollEvents();
+		render(glfwGetTime(), w, h);
 
-			if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-				glfwSetWindowShouldClose(window, true);
+		glfwSwapBuffers(window);
 
-			glfwGetFramebufferSize(window, &windowRes.x, &windowRes.y);
-			glViewport(0, 0, windowRes.x, windowRes.y);
-
-			glClearColor(0, 0, 0, 1);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-			quadVBO->bind();
-			
-			textureShader->bind();
-			textureShader->setUniform("mvp", glm::mat4(1));
-
-			quadVBO->draw();
-
-			OGLPP_ERROR_CHECK();
-			glfwSwapBuffers(window);
-		}
-
-		glfwDestroyWindow(window);
+		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+			break;
 	}
+
+	glfwTerminate();
 
 	return 0;
 }
