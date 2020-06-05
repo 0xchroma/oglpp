@@ -55,9 +55,9 @@ void main()
 // uniform handlers for gl::Program
 namespace gl
 {
-	void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 2, glm::value_ptr(v)); }
-	void setProgramUniform(GLuint index, const glm::vec3& v) { glUniform3fv(index, 3, glm::value_ptr(v)); }
-	void setProgramUniform(GLuint index, const glm::vec4& v) { glUniform4fv(index, 4, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 1, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::vec3& v) { glUniform3fv(index, 1, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::vec4& v) { glUniform4fv(index, 1, glm::value_ptr(v)); }
 	void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
 }
 
