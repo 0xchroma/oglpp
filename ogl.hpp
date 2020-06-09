@@ -55,8 +55,11 @@ namespace gl
 		{ 
 			int index{};
 			GLenum type = GL_FLOAT;
-			int size{};
+			int count{};
 			int offset{};
+
+			Layout(int cIndex, GLenum cType, int cCount, int cOffset = 0) :
+				index(cIndex), type(cType), count(cCount), offset(cOffset) {}
 		};
 
 	private:
@@ -135,7 +138,7 @@ namespace gl
 			{
 				glEnableVertexAttribArray(elem.index);
 				const uintptr_t offset = elem.offset;
-				glVertexAttribPointer(elem.index, elem.size, elem.type, GL_FALSE, sizeof(VertexT), (void*)offset);
+				glVertexAttribPointer(elem.index, elem.count, elem.type, GL_FALSE, sizeof(VertexT), (void*)offset);
 				OGLPP_ERROR_CHECK();
 			}
 		}
@@ -641,13 +644,11 @@ namespace gl
 		{ 
 			const auto index = glGetUniformLocation(handle, name);
 
-			OGLPP_ASSERT(index != -1);
-
 			return index;
 		}
 
 		template<typename T>
-		void setUniform(const char* name, const T& value) { gl::setProgramUniform(getUniformLocation(name), value); }
+		void setUniform(const char* name, const T& value) { int index{}; if ((index = getUniformLocation(name)) >= 0) gl::setProgramUniform(index, value); }
 	};
 
 	static inline void setProgramUniform(GLuint index, GLuint i) { glUniform1i(index, i); }
