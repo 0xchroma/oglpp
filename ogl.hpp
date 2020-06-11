@@ -143,6 +143,23 @@ namespace gl
 			}
 		}
 
+		template<typename VertexT>
+		void updateVertexData(const VertexT* verts, int numVerts, int offset = 0)
+		{
+			bind();
+
+			OGLPP_ASSERT(vbo.handle);
+
+			if (offset + numVerts > vbo.numVerts)
+			{
+				// TODO: resize buffer
+				OGLPP_ASSERT(false);
+			}
+
+			glBufferSubData(GL_ARRAY_BUFFER, offset, numVerts * sizeof(VertexT), verts);
+			OGLPP_ERROR_CHECK();
+		}
+
 		void setElementData(const uint32_t* indices, int numIndices)
 		{
 			bind();
@@ -254,6 +271,7 @@ namespace gl
 
 		void resize(int width, int height) override
 		{
+			OGLPP_ASSERT(false);
 		}
 
 		void bind() const
