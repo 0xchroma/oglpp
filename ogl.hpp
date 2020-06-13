@@ -25,6 +25,18 @@ void operator=(Name&& other) noexcept MOVER
 OGLPP_NOT_COPYABLE(Name) \
 OGLPP_MOVEABLE(Name, MOVER)
 
+/*
+#include "glm/gtc/type_ptr.hpp"
+
+namespace gl
+{
+	void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 1, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::vec3& v) { glUniform3fv(index, 1, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::vec4& v) { glUniform4fv(index, 1, glm::value_ptr(v)); }
+	void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
+}
+*/
+
 namespace gl
 {
 	// returns the last error string
