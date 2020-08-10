@@ -26,15 +26,15 @@ OGLPP_NOT_COPYABLE(Name) \
 OGLPP_MOVEABLE(Name, MOVER)
 
 /*
-#include "glm/gtc/type_ptr.hpp"
+	#include "glm/gtc/type_ptr.hpp"
 
-namespace gl
-{
-	void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 1, glm::value_ptr(v)); }
-	void setProgramUniform(GLuint index, const glm::vec3& v) { glUniform3fv(index, 1, glm::value_ptr(v)); }
-	void setProgramUniform(GLuint index, const glm::vec4& v) { glUniform4fv(index, 1, glm::value_ptr(v)); }
-	void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
-}
+	namespace gl
+	{
+		void setProgramUniform(GLuint index, const glm::vec2& v) { glUniform2fv(index, 1, glm::value_ptr(v)); }
+		void setProgramUniform(GLuint index, const glm::vec3& v) { glUniform3fv(index, 1, glm::value_ptr(v)); }
+		void setProgramUniform(GLuint index, const glm::vec4& v) { glUniform4fv(index, 1, glm::value_ptr(v)); }
+		void setProgramUniform(GLuint index, const glm::mat4& m) { glUniformMatrix4fv(index, 1, GL_FALSE, glm::value_ptr(m)); }
+	}
 */
 
 namespace gl
@@ -153,6 +153,8 @@ namespace gl
 				glVertexAttribPointer(elem.index, elem.count, elem.type, GL_FALSE, sizeof(VertexT), (void*)offset);
 				OGLPP_ERROR_CHECK();
 			}
+
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 		}
 
 		template<typename VertexT>
@@ -168,7 +170,9 @@ namespace gl
 				OGLPP_ASSERT(false);
 			}
 
+			glBindBuffer(GL_ARRAY_BUFFER, vbo.handle);
 			glBufferSubData(GL_ARRAY_BUFFER, offset, numVerts * sizeof(VertexT), verts);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			OGLPP_ERROR_CHECK();
 		}
 
@@ -200,14 +204,14 @@ namespace gl
 			glBindVertexArray(0);
 		}
 
-		void draw(GLenum mode = GL_TRIANGLES)
+		void draw(GLenum mode = GL_TRIANGLES, int offset = 0, int count = 0)
 		{
 			bind();
 			
 			if (ebo.handle)
 				glDrawElements(mode, ebo.numElems, GL_UNSIGNED_INT, nullptr);
 			else
-				glDrawArrays(mode, 0, vbo.numVerts);
+				glDrawArrays(mode, offset, count == 0 ? vbo.numVerts : count);
 
 			OGLPP_ERROR_CHECK();
 		}
